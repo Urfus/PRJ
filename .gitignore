@@ -13,3 +13,10 @@
 /crypt_drv.mod.o
 /crypt_drv.o
 /modules.order
+tst/test_drv
+src/queue.o
+src/params.o
+src/main.o
+src/.queue.o.cmd
+src/.params.o.cmd
+src/.main.o.cmd
