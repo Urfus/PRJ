@@ -7,9 +7,13 @@
 #include <linux/uaccess.h>
 
 #include "../inc/crypt_drv.h"
+#include "../inc/crypto.h"
 #include "../inc/params.h"
 
 int max_length = 4096;
+enum my_crypto_type crypto_alg = ALGO_AES;
+enum my_crypto_mode crypto_oper = MODE_ENCRYPT;
+char *key_str;
 
 static int major;
 static struct class *dev_class;
