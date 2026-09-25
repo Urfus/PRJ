@@ -1,0 +1,15 @@
+/..module-common.o.cmd
+/.Module.symvers.cmd
+/.crypt_drv.ko.cmd
+/.crypt_drv.mod.cmd
+/.crypt_drv.mod.o.cmd
+/.crypt_drv.o.cmd
+/.module-common.o
+/.modules.order.cmd
+/Module.symvers
+/crypt_drv.ko
+/crypt_drv.mod
+/crypt_drv.mod.c
+/crypt_drv.mod.o
+/crypt_drv.o
+/modules.order
