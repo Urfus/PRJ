@@ -8,6 +8,8 @@
 #include "../inc/queue.h"
 
 #define DRV_NAME "crypt_drv"
+#define IOCTL_SET_MODE _IOW('D', 1, int)
+
 #define MAX_IV_SIZE 32
 
 enum my_crypto_type {

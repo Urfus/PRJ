@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <pthread.h>
 
+#define IOCTL_SET_MODE _IOW('D', 1, int)
+#define MODE_ENCRYPT 0
+#define MODE_DECRYPT 1
+
 pthread_barrier_t sync_barrier;
 
 void* second_thread(void* arg) {
@@ -20,7 +24,11 @@ void* second_thread(void* arg) {
 
     char plain[] = "SECOND: Hello !!";
     char buf_out[64] = {0};
+    char buf_ctrl[64] = {0};
     int mode;
+
+    mode = MODE_ENCRYPT;
+    ioctl(fd, IOCTL_SET_MODE, &mode);
 
     pthread_barrier_wait(&sync_barrier); 
 
@@ -28,7 +36,16 @@ void* second_thread(void* arg) {
     printf("SECOND: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
     
     ssize_t rl = read(fd, buf_out, sizeof(buf_out));
-    printf("SECOND: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+    printf("SECOND: Прочитано байт (зашифровано): %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+
+    mode = MODE_DECRYPT;
+    ioctl(fd, IOCTL_SET_MODE, &mode);
+
+    ssize_t w2 = write(fd, buf_out, strlen(buf_out));
+    printf("SECOND: Записано байт: %lu, строка: %s\n", w2, buf_out); // Будет набор нечитаемых символов
+
+    ssize_t r2 = read(fd, buf_ctrl, sizeof(buf_ctrl));
+    printf("SECOND: Прочитано байт (расшифровано): %lu, строка: %s\n", r2, buf_ctrl); // Будет набор нечитаемых символов
 
     pthread_barrier_wait(&sync_barrier); 
 

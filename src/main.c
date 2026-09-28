@@ -180,6 +180,29 @@ static ssize_t drv_read(struct file *file, char __user *ubuf,
     return (ssize_t)nread;
 }
 
+static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    struct proc_ctx *ctx = file->private_data;
+    int mode;
+
+    if (cmd == IOCTL_SET_MODE) {
+        if (copy_from_user(&mode, (int __user *)arg, sizeof(int)))
+            return -EFAULT;
+        
+        if (mode != MODE_ENCRYPT && mode != MODE_DECRYPT)
+            return -EINVAL;
+
+        mutex_lock(&ctx->lock);
+        ctx->mode = mode;
+        mutex_unlock(&ctx->lock);
+        
+        pr_info(DRV_NAME ": PID %d set mode to %s\n", 
+                current->pid, mode ? "DECRYPT" : "ENCRYPT");
+        return 0;
+    }
+
+    return -ENOTTY;
+}
 
 static const struct file_operations drv_fops = {
     .owner   = THIS_MODULE,
@@ -187,6 +210,7 @@ static const struct file_operations drv_fops = {
     .release = drv_release,
     .read    = drv_read,
     .write   = drv_write,
+    .unlocked_ioctl = drv_ioctl,
 };
 
 static int __init drv_init(void)
