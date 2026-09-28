@@ -8,6 +8,7 @@
 #include "../inc/queue.h"
 
 #define DRV_NAME "crypt_drv"
+#define MAX_IV_SIZE 32
 
 enum my_crypto_type {
     ALGO_AES      = 0,
@@ -24,6 +25,10 @@ struct proc_ctx {
     struct ring_buffer *rb;
     struct mutex lock;
     int mode;
+
+    u8 iv[MAX_IV_SIZE];        // "Эталонный" IV для этого процесса
+    size_t ivsize;             // Размер IV (0 для ECB)
+
 };
 
 

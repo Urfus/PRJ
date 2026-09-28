@@ -35,6 +35,22 @@ static int drv_open(struct inode *inode, struct file *file)
     ctx->mode = MODE_ENCRYPT;
 
     mutex_init(&ctx->lock);
+
+    // Получаем размер IV для текущего алгоритма
+    ctx->ivsize = drv_crypto_ivsize();
+    
+    // Генерируем случайный IV для этого процесса
+    if (ctx->ivsize > 0) {
+        if (ctx->ivsize > MAX_IV_SIZE) {
+            pr_err(DRV_NAME ": IV size %zu exceeds MAX_IV_SIZE %d\n",
+                   ctx->ivsize, MAX_IV_SIZE);
+            rb_free(ctx->rb);
+            kfree(ctx);
+            return -EINVAL;
+        }
+        get_random_bytes(ctx->iv, ctx->ivsize);
+    }
+
     file->private_data = ctx;
 
     pr_info(DRV_NAME ": Device opened by PID %d (buffer %d bytes)\n", current->pid, max_length);
@@ -59,20 +75,58 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
 {
     struct proc_ctx *ctx = file->private_data;
     char *kbuf;
-    size_t written;
+
+    u8 iv_local[MAX_IV_SIZE];  // Локальная копия IV
+    size_t written, crypto_len, final_len;
+    size_t block_size;
+    size_t alloc_size;
+
     int ret;
 
     if (!count)
         return 0;
 
-    kbuf = memdup_user(ubuf, count);
-    if (IS_ERR(kbuf))
-        return PTR_ERR(kbuf);
+    block_size = drv_crypto_blocksize();
+    alloc_size = count + block_size;
+    
+    kbuf = kmalloc(alloc_size, GFP_KERNEL);
+    if (!kbuf) return -ENOMEM;
+
+    if (copy_from_user(kbuf, ubuf, count)) {
+        kfree(kbuf);
+        return -EFAULT;
+    }
+
+    pr_info(DRV_NAME ": PID %d write %zu bytes, mode=%s\n",
+        current->pid, count,
+        ctx->mode == MODE_ENCRYPT ? "ENCRYPT" : "DECRYPT");
+
+    crypto_len = count;
+    
+    if (ctx->mode == MODE_ENCRYPT) {
+        crypto_len = add_pkcs7_padding(kbuf, count, alloc_size, block_size);
+        if (crypto_len == 0) {
+            kfree(kbuf);
+            return -EINVAL;
+        }
+    } else {
+        if (block_size > 1 && (count % block_size) != 0) {
+            pr_err(DRV_NAME ": DECRYPT mode requires length multiple of %zu "
+                   "(got %zu)\n", block_size, count);
+            kfree(kbuf);
+            return -EINVAL;
+        }
+    }
 
     mutex_lock(&ctx->lock);
+    if (ctx->ivsize > 0)
+        memcpy(iv_local, ctx->iv, ctx->ivsize);
+
     pr_info(DRV_NAME ": write str = %.*s\n", (int) count, kbuf);
 
-    ret = drv_do_crypto(kbuf, count, (ctx->mode == MODE_ENCRYPT));
+    ret = drv_do_crypto(kbuf, crypto_len, (ctx->mode == MODE_ENCRYPT), 
+                        ctx->ivsize > 0 ? iv_local : NULL,
+                        ctx->ivsize);
     pr_info(DRV_NAME ": str after do_crypto = %.*s\n", (int) count, kbuf);
 
     if (ret < 0) {
@@ -80,6 +134,11 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
         mutex_unlock(&ctx->lock);
         kfree(kbuf);
         return 0;
+    }
+
+    final_len = crypto_len;
+    if (ctx->mode == MODE_DECRYPT) {
+        final_len = remove_pkcs7_padding(kbuf, crypto_len);
     }
 
     written = rb_put(ctx->rb, kbuf, count);
