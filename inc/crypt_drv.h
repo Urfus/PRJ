@@ -9,11 +9,6 @@
 
 #define DRV_NAME "crypt_drv"
 
-struct proc_ctx {
-    struct ring_buffer *rb;
-    struct mutex lock;
-};
-
 enum my_crypto_type {
     ALGO_AES      = 0,
     ALGO_CHACHA   = 1,
@@ -25,9 +20,15 @@ enum my_crypto_mode {
     MODE_DECRYPT = 1
 };
 
+struct proc_ctx {
+    struct ring_buffer *rb;
+    struct mutex lock;
+    int mode;
+};
+
+
 extern int max_length;
 extern enum my_crypto_type crypto_alg;
-extern enum my_crypto_mode crypto_oper;
 extern char *key_str;
 
 #endif // CRYPT_DRV_H

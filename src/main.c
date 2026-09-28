@@ -12,8 +12,8 @@
 
 int max_length = 4096;
 enum my_crypto_type crypto_alg = ALGO_AES;
-enum my_crypto_mode crypto_oper = MODE_ENCRYPT;
-char *key_str;
+
+char *key_str = "1234567612635463";  // 16 byte
 
 static int major;
 static struct class *dev_class;
@@ -32,6 +32,7 @@ static int drv_open(struct inode *inode, struct file *file)
         kfree(ctx);
         return -ENOMEM;
     }
+    ctx->mode = MODE_ENCRYPT;
 
     mutex_init(&ctx->lock);
     file->private_data = ctx;
@@ -59,6 +60,7 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
     struct proc_ctx *ctx = file->private_data;
     char *kbuf;
     size_t written;
+    int ret;
 
     if (!count)
         return 0;
@@ -68,6 +70,18 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
         return PTR_ERR(kbuf);
 
     mutex_lock(&ctx->lock);
+    pr_info(DRV_NAME ": write str = %.*s\n", (int) count, kbuf);
+
+    ret = drv_do_crypto(kbuf, count, (ctx->mode == MODE_ENCRYPT));
+    pr_info(DRV_NAME ": str after do_crypto = %.*s\n", (int) count, kbuf);
+
+    if (ret < 0) {
+        pr_err(DRV_NAME ": error do_crypto  %d\n", ret);
+        mutex_unlock(&ctx->lock);
+        kfree(kbuf);
+        return 0;
+    }
+
     written = rb_put(ctx->rb, kbuf, count);
     mutex_unlock(&ctx->lock);
 
@@ -118,7 +132,11 @@ static const struct file_operations drv_fops = {
 
 static int __init drv_init(void)
 {
-    drv_params_init();
+
+    int ret;
+
+    ret = drv_crypto_init();
+    if (ret) return ret;
 
     /* 1. Регистрация символьного устройства (динамический major) */
     major = register_chrdev(0, DRV_NAME, &drv_fops);
@@ -145,6 +163,10 @@ static int __init drv_init(void)
     }
 
     pr_info(DRV_NAME ": Module loaded. Major: %d\n", major);
+    pr_info(DRV_NAME ": param max_length = %d\n", max_length);
+    pr_info(DRV_NAME ": crypto algorithm = %d\n", crypto_alg);
+    pr_info(DRV_NAME ": symmetric encryption key = %s\n", key_str);
+
     return 0;
 }
 
@@ -153,7 +175,7 @@ static void __exit drv_exit(void)
     device_destroy(dev_class, MKDEV(major, 0));
     class_destroy(dev_class);
     unregister_chrdev(major, DRV_NAME);
-    drv_params_exit();
+    drv_crypto_exit();
     pr_info(DRV_NAME ": Module unloaded\n");
 }
 

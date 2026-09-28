@@ -61,17 +61,6 @@ MODULE_PARM_DESC(crypto_algorithm, "Crypto algorithm: 0 - ecb(aes), 1 - chacha20
 module_param(key_str, charp, 0444);
 MODULE_PARM_DESC(key_str, "Symmetric encryption key");
 
-void drv_params_init(void)
-{
-    pr_info(DRV_NAME ": param max_length = %d\n", max_length);
-    pr_info(DRV_NAME ": crypto algorithm = %d\n", crypto_alg);
-    pr_info(DRV_NAME ": symmetric encryption key = %s\n", key_str);
-}
-
-void drv_params_exit(void)
-{
-    /* зарезервировано для будущих ресурсов */
-}
 
 
 

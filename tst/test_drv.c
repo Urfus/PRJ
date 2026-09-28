@@ -1,18 +1,81 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <string.h>
+#include <stdlib.h>
+#include <pthread.h>
 
-// #define IOCTL_SET_MODE _IOW('D', 1, int)
-// #define MODE_ENCRYPT 0
-// #define MODE_DECRYPT 1
+pthread_barrier_t sync_barrier;
+
+void* second_thread(void* arg) {
+    printf("SECOND: start thread\n");
+
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) { perror("open"); return NULL; }
+
+    printf("SECOND: open device - OK\n");
+
+    char plain[] = "SECOND: Hello !!";
+    char buf_out[64] = {0};
+    int mode;
+
+    pthread_barrier_wait(&sync_barrier); 
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("SECOND: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+    
+    ssize_t rl = read(fd, buf_out, sizeof(buf_out));
+    printf("SECOND: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+
+    pthread_barrier_wait(&sync_barrier); 
+
+    buf_out[0] = 0;
+    rl = read(fd, buf_out, sizeof(buf_out));
+    printf("SECOND: Повторное чтение - Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+
+
+    wl = write(fd, plain, strlen(plain));
+    printf("SECOND: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+    wl = write(fd, plain, strlen(plain));
+    printf("SECOND: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+
+    pthread_barrier_wait(&sync_barrier); 
+
+    rl = read(fd, buf_out, sizeof(buf_out));
+    printf("SECOND: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+
+
+    close(fd);
+    printf("SECOND: Stop thread\n");
+
+    return NULL;
+}
+
 
 int main() {
+    printf("Start test modules\n");
+
+    pthread_t pth_second;
+
+    if (pthread_barrier_init(&sync_barrier, NULL, 2) != 0) {
+        perror("error init barrier");
+        return EXIT_FAILURE;
+    }
+
+    if (pthread_create(&pth_second, NULL, second_thread, NULL) != 0) {
+        perror("Error pthread_create");
+        return EXIT_FAILURE;
+    }
+
     int fd = open("/dev/crypt_drv", O_RDWR);
     if (fd < 0) { perror("open"); return 1; }
 
-    char plain[] = "Hello, Kernel Crypto!";
+    printf("FIRST: open device - OK\n");
+
+    char plain[] = "FIRST: Hello !!";
     char buf_out[64] = {0};
     int mode;
 
@@ -20,35 +83,39 @@ int main() {
     // mode = MODE_ENCRYPT;
     // ioctl(fd, IOCTL_SET_MODE, &mode);
 
+    pthread_barrier_wait(&sync_barrier); 
+
     ssize_t wl = write(fd, plain, strlen(plain));
-    printf("Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+    printf("FIRST: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
     
     ssize_t rl = read(fd, buf_out, sizeof(buf_out));
-    printf("Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+    printf("FIRST: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+
+    pthread_barrier_wait(&sync_barrier); 
 
     buf_out[0] = 0;
     rl = read(fd, buf_out, sizeof(buf_out));
-    printf("Повторное чтение - Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+    printf("FIRST: Повторное чтение - Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
 
 
     wl = write(fd, plain, strlen(plain));
-    printf("Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+    printf("FIRST: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
     wl = write(fd, plain, strlen(plain));
-    printf("Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+    printf("FIRST: Записано байт: %lu, строка: %s\n", wl, plain); // Будет набор нечитаемых символов
+
+    pthread_barrier_wait(&sync_barrier); 
 
     rl = read(fd, buf_out, sizeof(buf_out));
-    printf("Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
+    printf("FIRST: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
 
+    if (pthread_join(pth_second, NULL) != 0) {
+        perror("Error pthread_join");
+        return EXIT_FAILURE;
+    }
 
-    // // 2. Режим дешифрования (пишем то, что прочитали, читаем оригинал)
-    // mode = MODE_DECRYPT;
-    // ioctl(fd, IOCTL_SET_MODE, &mode);
-    // write(fd, buf_out, strlen(plain)); // Пишем шифротекст
-    
-    // memset(buf_out, 0, sizeof(buf_out));
-    // read(fd, buf_out, sizeof(buf_out));
-    // printf("Decrypted read: %s\n", buf_out); // Вернется "Hello, Kernel Crypto!"
+    pthread_barrier_destroy(&sync_barrier);
 
     close(fd);
+    printf("Stop test modules\n");
     return 0;
 }
