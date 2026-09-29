@@ -7,58 +7,86 @@
 #include "../inc/crypto.h"
 #include "../inc/crypt_drv.h"
 
-static struct crypto_skcipher *tfm = NULL;
-
 static const char *algo_names[] = {
     "ecb(aes)",      // индекс 0
     "chacha20",      // индекс 1
     "des3_ede"       // индекс 2
 };
 
-int drv_crypto_init(void)
+struct crypto_ctx* drv_crypto_init(void)
 {
     int ret;
 
-    tfm = crypto_alloc_skcipher(algo_names[crypto_alg], 0, 0);
-    if (IS_ERR(tfm)) {
-        pr_err(DRV_NAME ": Failed to alloc crypto %s\n", algo_names[crypto_alg]);
-        return PTR_ERR(tfm);
+    struct crypto_ctx *local_crypto_data = NULL;
+    
+    local_crypto_data = kzalloc(sizeof(*local_crypto_data), GFP_KERNEL);
+    if (!local_crypto_data) {
+        return NULL;
+    }
+    // значения по умолчанию для алгоритма и строки ключа
+    local_crypto_data->crypto_alg = ALGO_AES;
+   
+    if (strscpy(local_crypto_data->key_str, "1234567890abcdef", sizeof(local_crypto_data->key_str)) < 0) {
+        pr_err("default key string too long for buffer\n");
+        kfree(local_crypto_data);
+        return NULL;
     }
 
-    ret = crypto_skcipher_setkey(tfm, key_str, strlen(key_str));
+    local_crypto_data->ivsize = drv_crypto_ivsize(local_crypto_data);
+    
+    // Генерируем случайный IV для этого процесса
+    if (local_crypto_data->ivsize > 0) {
+        if (local_crypto_data->ivsize > MAX_IV_SIZE) {
+            pr_err(DRV_NAME ": IV size %zu exceeds MAX_IV_SIZE %d\n",
+                   local_crypto_data->ivsize, MAX_IV_SIZE);
+            kfree(local_crypto_data);
+            return NULL;
+        }
+        get_random_bytes(local_crypto_data->iv, local_crypto_data->ivsize);
+    }
+
+    local_crypto_data->tfm = crypto_alloc_skcipher(algo_names[local_crypto_data->crypto_alg], 0, 0);
+    if (IS_ERR(local_crypto_data->tfm)) {
+        pr_err(DRV_NAME ": Failed to alloc crypto %s\n", algo_names[local_crypto_data->crypto_alg]);
+        kfree(local_crypto_data);
+        return NULL;
+    }
+
+    ret = crypto_skcipher_setkey(local_crypto_data->tfm, local_crypto_data->key_str, strlen(local_crypto_data->key_str));
     if (ret) {
-        pr_err(DRV_NAME ": Invalid key length for %s\n", algo_names[crypto_alg]);
-        crypto_free_skcipher(tfm);
-        return ret;
+        pr_err(DRV_NAME ": Invalid key length for %s\n", algo_names[local_crypto_data->crypto_alg]);
+        crypto_free_skcipher(local_crypto_data->tfm);
+        kfree(local_crypto_data);
+        return NULL;
     }
 
     pr_info(DRV_NAME ": Crypto initialized: algo=%s, blocksize=%u, ivsize=%u\n",
-        algo_names[crypto_alg],
-        crypto_skcipher_blocksize(tfm),
-        crypto_skcipher_ivsize(tfm));
+        algo_names[local_crypto_data->crypto_alg],
+        crypto_skcipher_blocksize(local_crypto_data->tfm),
+        crypto_skcipher_ivsize(local_crypto_data->tfm));
 
-    return 0;
+    return local_crypto_data;
 }
 
-void drv_crypto_exit(void)
+void drv_crypto_exit(struct crypto_ctx* ptr_crypto_ctx)
 {
-    if (tfm)
-        crypto_free_skcipher(tfm);
+    if (ptr_crypto_ctx->tfm)
+        crypto_free_skcipher(ptr_crypto_ctx->tfm);
 }
 
-size_t drv_crypto_blocksize(void)
+size_t drv_crypto_blocksize(struct crypto_ctx* ptr_crypto_ctx)
 {
-    if (!tfm) return 1;
-    return crypto_skcipher_blocksize(tfm);
+    if (!ptr_crypto_ctx->tfm) return 1;
+    return crypto_skcipher_blocksize(ptr_crypto_ctx->tfm);
 }
 
-size_t drv_crypto_ivsize(void)
+size_t drv_crypto_ivsize(struct crypto_ctx* ptr_crypto_ctx)
 {
-    if (!tfm) return 0;
-    return crypto_skcipher_ivsize(tfm);
+    if (!ptr_crypto_ctx->tfm) return 0;
+    return crypto_skcipher_ivsize(ptr_crypto_ctx->tfm);
 }
 
-int drv_do_crypto(char *buf, size_t len, int encrypt, u8 *iv, size_t ivsize)
+int drv_do_crypto(struct crypto_ctx* ptr_crypto_ctx, char *buf, size_t len, int encrypt, u8 *iv)
 {
    
     struct skcipher_request *req;
@@ -66,9 +94,9 @@ int drv_do_crypto(char *buf, size_t len, int encrypt, u8 *iv, size_t ivsize)
     DECLARE_CRYPTO_WAIT(wait);
     int ret;
 
-    if (!tfm || len == 0) return 0;
+    if (!ptr_crypto_ctx->tfm || len == 0) return 0;
 
-    req = skcipher_request_alloc(tfm, GFP_KERNEL);
+    req = skcipher_request_alloc(ptr_crypto_ctx->tfm, GFP_KERNEL);
     if (!req) {
         pr_err(DRV_NAME ": Failed to allocate skcipher request\n");
         return -ENOMEM;
@@ -78,7 +106,7 @@ int drv_do_crypto(char *buf, size_t len, int encrypt, u8 *iv, size_t ivsize)
     if (!req) return -ENOMEM;
 
     sg_init_one(&sg, buf, len);
-    skcipher_request_set_crypt(req, &sg, &sg, len, ivsize > 0 ? iv : NULL);
+    skcipher_request_set_crypt(req, &sg, &sg, len, ptr_crypto_ctx->ivsize > 0 ? iv : NULL);
     skcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_SLEEP, crypto_req_done, &wait);
 
     if (encrypt)

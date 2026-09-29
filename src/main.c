@@ -11,9 +11,9 @@
 #include "../inc/params.h"
 
 int max_length = 4096;
-enum my_crypto_type crypto_alg = ALGO_AES;
 
-char *key_str = "1234567612635463";  // 16 byte
+// enum my_crypto_type crypto_alg = ALGO_AES;
+// char *default_key_str = "1234567612635463";  // 16 byte
 
 static int major;
 static struct class *dev_class;
@@ -36,19 +36,10 @@ static int drv_open(struct inode *inode, struct file *file)
 
     mutex_init(&ctx->lock);
 
-    // Получаем размер IV для текущего алгоритма
-    ctx->ivsize = drv_crypto_ivsize();
-    
-    // Генерируем случайный IV для этого процесса
-    if (ctx->ivsize > 0) {
-        if (ctx->ivsize > MAX_IV_SIZE) {
-            pr_err(DRV_NAME ": IV size %zu exceeds MAX_IV_SIZE %d\n",
-                   ctx->ivsize, MAX_IV_SIZE);
-            rb_free(ctx->rb);
-            kfree(ctx);
-            return -EINVAL;
-        }
-        get_random_bytes(ctx->iv, ctx->ivsize);
+    ctx->crypto_data = drv_crypto_init();
+    if (!ctx->crypto_data) {
+        kfree(ctx);
+        return -ENOMEM;
     }
 
     file->private_data = ctx;
@@ -62,6 +53,8 @@ static int drv_release(struct inode *inode, struct file *file)
     struct proc_ctx *ctx = file->private_data;
 
     rb_free(ctx->rb);
+    drv_crypto_exit(ctx->crypto_data);
+    kfree(ctx->crypto_data);
     kfree(ctx);
 
     pr_info(DRV_NAME ": closed by PID %d\n", current->pid);
@@ -86,7 +79,7 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
     if (!count)
         return 0;
 
-    block_size = drv_crypto_blocksize();
+    block_size = drv_crypto_blocksize(ctx->crypto_data);
     alloc_size = count + block_size;
     
     kbuf = kmalloc(alloc_size, GFP_KERNEL);
@@ -119,21 +112,20 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
     }
 
     mutex_lock(&ctx->lock);
-    if (ctx->ivsize > 0)
-        memcpy(iv_local, ctx->iv, ctx->ivsize);
+    if (ctx->crypto_data->ivsize > 0)
+        memcpy(iv_local, ctx->crypto_data->iv, ctx->crypto_data->ivsize);
 
     pr_info(DRV_NAME ": write str = %.*s\n", (int) count, kbuf);
 
-    ret = drv_do_crypto(kbuf, crypto_len, (ctx->mode == MODE_ENCRYPT), 
-                        ctx->ivsize > 0 ? iv_local : NULL,
-                        ctx->ivsize);
-    pr_info(DRV_NAME ": str after do_crypto = %.*s\n", (int) count, kbuf);
+    ret = drv_do_crypto(ctx->crypto_data, kbuf, crypto_len, (ctx->mode == MODE_ENCRYPT), 
+                        ctx->crypto_data->ivsize > 0 ? iv_local : NULL);
+    pr_info(DRV_NAME ": after do_crypto len = %d, str = %.*s\n", (int) crypto_len, (int) crypto_len, kbuf);
 
     if (ret < 0) {
         pr_err(DRV_NAME ": error do_crypto  %d\n", ret);
         mutex_unlock(&ctx->lock);
         kfree(kbuf);
-        return 0;
+        return ret;
     }
 
     final_len = crypto_len;
@@ -141,11 +133,11 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
         final_len = remove_pkcs7_padding(kbuf, crypto_len);
     }
 
-    written = rb_put(ctx->rb, kbuf, count);
+    written = rb_put(ctx->rb, kbuf, final_len);
     mutex_unlock(&ctx->lock);
 
     kfree(kbuf);
-    return written ? (ssize_t)written : -ENOSPC;
+    return written ? (ssize_t)count : -ENOSPC;
 }
     
 static ssize_t drv_read(struct file *file, char __user *ubuf,
@@ -216,19 +208,18 @@ static const struct file_operations drv_fops = {
 static int __init drv_init(void)
 {
 
-    int ret;
+    // int ret;
 
-    ret = drv_crypto_init();
-    if (ret) return ret;
+    // ret = drv_crypto_init();
+    // if (ret) return ret;
+    // drv_crypto_exit();
 
-    /* 1. Регистрация символьного устройства (динамический major) */
     major = register_chrdev(0, DRV_NAME, &drv_fops);
     if (major < 0) {
         pr_err(DRV_NAME ": Failed to register chrdev: %d\n", major);
         return major;
     }
 
-    /* 2. Создание класса устройства (для udev) */
     dev_class = class_create(DRV_NAME);
     if (IS_ERR(dev_class)) {
         pr_err(DRV_NAME ": Failed to create class\n");
@@ -236,7 +227,6 @@ static int __init drv_init(void)
         return PTR_ERR(dev_class);
     }
 
-    /* 3. Создание узла /dev/crypt_drv */
     dev = device_create(dev_class, NULL, MKDEV(major, 0), NULL, DRV_NAME);
     if (IS_ERR(dev)) {
         pr_err(DRV_NAME ": Failed to create device\n");
@@ -247,8 +237,8 @@ static int __init drv_init(void)
 
     pr_info(DRV_NAME ": Module loaded. Major: %d\n", major);
     pr_info(DRV_NAME ": param max_length = %d\n", max_length);
-    pr_info(DRV_NAME ": crypto algorithm = %d\n", crypto_alg);
-    pr_info(DRV_NAME ": symmetric encryption key = %s\n", key_str);
+    // pr_info(DRV_NAME ": crypto algorithm = %d\n", crypto_alg);
+    // pr_info(DRV_NAME ": symmetric encryption key = %s\n", key_str);
 
     return 0;
 }
@@ -258,7 +248,6 @@ static void __exit drv_exit(void)
     device_destroy(dev_class, MKDEV(major, 0));
     class_destroy(dev_class);
     unregister_chrdev(major, DRV_NAME);
-    drv_crypto_exit();
     pr_info(DRV_NAME ": Module unloaded\n");
 }
 

@@ -10,6 +10,7 @@ build:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) modules
 
 run:
+	modprobe crypto cryptomgr skcipher ecb aes
 	insmod $(PWD)/$(DRV_NAME).ko
 
 remove:
