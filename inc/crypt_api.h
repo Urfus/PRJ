@@ -11,12 +11,12 @@
 
 #define DRV_MAX_KEY_LEN 64  // Максимальная длина ключа
 
-
+// используемые алгоритмы шифрования
 enum my_crypto_type {
     ALGO_ECB_AES    = 0,
     ALGO_CBC_AES    = 1,
 };
-
+// режимы работы
 enum my_crypto_mode {
     MODE_ENCRYPT = 0,
     MODE_DECRYPT = 1
@@ -25,7 +25,7 @@ enum my_crypto_mode {
 // Структура для передачи ключа
 struct drv_key_param {
     char key_str[DRV_MAX_KEY_LEN];  // Буфер для ключа
-    size_t key_len;             // Реальная длина ключа
+    size_t key_len;                 // Реальная длина ключа
 };
 
 #endif // CRYPT_API_H

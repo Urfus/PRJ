@@ -8,7 +8,6 @@
 
 #include "../inc/crypt_drv.h"
 #include "../inc/crypto.h"
-#include "../inc/params.h"
 
 int max_length = 4096;
 
@@ -90,10 +89,6 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
         return -EFAULT;
     }
 
-    pr_info(DRV_NAME ": PID %d write %zu bytes, mode=%s\n",
-        current->pid, count,
-        ctx->mode == MODE_ENCRYPT ? "ENCRYPT" : "DECRYPT");
-
     crypto_len = count;
     
     if (ctx->mode == MODE_ENCRYPT) {
@@ -115,11 +110,8 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
     if (ctx->crypto_data->ivsize > 0)
         memcpy(iv_local, ctx->crypto_data->iv, ctx->crypto_data->ivsize);
 
-    pr_info(DRV_NAME ": write str = %.*s\n", (int) count, kbuf);
-
     ret = drv_do_crypto(ctx->crypto_data, kbuf, crypto_len, (ctx->mode == MODE_ENCRYPT), 
                         ctx->crypto_data->ivsize > 0 ? iv_local : NULL);
-    pr_info(DRV_NAME ": after do_crypto len = %d, str = %.*s\n", (int) crypto_len, (int) crypto_len, kbuf);
 
     if (ret < 0) {
         pr_err(DRV_NAME ": error do_crypto  %d\n", ret);
@@ -193,8 +185,6 @@ static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         ctx->mode = mode;
         mutex_unlock(&ctx->lock);
         
-        pr_info(DRV_NAME ": PID %d set mode to %s\n", 
-                current->pid, mode ? "DECRYPT" : "ENCRYPT");
         return 0;
 
     case IOCTL_SET_CRYPTO_ALG:
@@ -218,8 +208,6 @@ static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             return ret;
         }      
 
-        pr_info(DRV_NAME ": PID %d set mode to %s\n", 
-                current->pid, mode ? "DECRYPT" : "ENCRYPT");
         return 0;
 
     case IOCTL_SET_KEY_STR:
@@ -270,12 +258,6 @@ static const struct file_operations drv_fops = {
 static int __init drv_init(void)
 {
 
-    // int ret;
-
-    // ret = drv_crypto_init();
-    // if (ret) return ret;
-    // drv_crypto_exit();
-
     major = register_chrdev(0, DRV_NAME, &drv_fops);
     if (major < 0) {
         pr_err(DRV_NAME ": Failed to register chrdev: %d\n", major);
@@ -299,8 +281,6 @@ static int __init drv_init(void)
 
     pr_info(DRV_NAME ": Module loaded. Major: %d\n", major);
     pr_info(DRV_NAME ": param max_length = %d\n", max_length);
-    // pr_info(DRV_NAME ": crypto algorithm = %d\n", crypto_alg);
-    // pr_info(DRV_NAME ": symmetric encryption key = %s\n", key_str);
 
     return 0;
 }

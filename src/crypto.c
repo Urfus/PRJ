@@ -106,7 +106,6 @@ int drv_do_crypto(struct crypto_ctx* ptr_crypto_ctx, char *buf, size_t len, int 
         pr_err(DRV_NAME ": Failed to allocate skcipher request\n");
         return -ENOMEM;
     }
-    pr_info(DRV_NAME ": (0) do_crypto\n");
 
     if (!req) return -ENOMEM;
 
@@ -119,10 +118,7 @@ int drv_do_crypto(struct crypto_ctx* ptr_crypto_ctx, char *buf, size_t len, int 
     else
         ret = crypto_skcipher_decrypt(req);
 
-    pr_info(DRV_NAME ": (1) do_crypto ret = %d\n", ret);
-
     ret = crypto_wait_req(ret, &wait);
-    pr_info(DRV_NAME ": (2) do_crypto ret = %d\n", ret);
 
     skcipher_request_free(req);
 
@@ -142,8 +138,6 @@ size_t add_pkcs7_padding(char *buf, size_t len, size_t capacity, size_t block_si
 
     pad_bytes = block_size - (len % block_size);
     padded_len = len + pad_bytes;
-
-    pr_info(DRV_NAME ": padding len = %zu, pad_bytes = %zu \n", len, pad_bytes);
 
     if (padded_len > capacity) {
         pr_err(DRV_NAME ": Not enough capacity for padding (%zu > %zu)\n",
