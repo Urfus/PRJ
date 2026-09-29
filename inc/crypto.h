@@ -6,7 +6,9 @@
 #include "../inc/crypt_drv.h"
 
 
-struct crypto_ctx* drv_crypto_init(void);
+struct crypto_ctx* drv_crypto_init(enum my_crypto_type alg);
+int drv_crypto_reinit(struct crypto_ctx* ptr_crypto_ctx);
+
 void drv_crypto_exit(struct crypto_ctx* ptr_crypto_ctx);
 size_t drv_crypto_blocksize(struct crypto_ctx* ptr_crypto_ctx);
 size_t drv_crypto_ivsize(struct crypto_ctx* ptr_crypto_ctx);

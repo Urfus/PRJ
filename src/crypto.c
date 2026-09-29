@@ -9,14 +9,11 @@
 
 static const char *algo_names[] = {
     "ecb(aes)",      // индекс 0
-    "chacha20",      // индекс 1
-    "des3_ede"       // индекс 2
+    "cbc(aes)",      // индекс 1
 };
 
-struct crypto_ctx* drv_crypto_init(void)
+struct crypto_ctx* drv_crypto_init(enum my_crypto_type alg)
 {
-    int ret;
-
     struct crypto_ctx *local_crypto_data = NULL;
     
     local_crypto_data = kzalloc(sizeof(*local_crypto_data), GFP_KERNEL);
@@ -24,7 +21,7 @@ struct crypto_ctx* drv_crypto_init(void)
         return NULL;
     }
     // значения по умолчанию для алгоритма и строки ключа
-    local_crypto_data->crypto_alg = ALGO_AES;
+    local_crypto_data->crypto_alg = alg;
    
     if (strscpy(local_crypto_data->key_str, "1234567890abcdef", sizeof(local_crypto_data->key_str)) < 0) {
         pr_err("default key string too long for buffer\n");
@@ -32,38 +29,10 @@ struct crypto_ctx* drv_crypto_init(void)
         return NULL;
     }
 
-    local_crypto_data->ivsize = drv_crypto_ivsize(local_crypto_data);
-    
-    // Генерируем случайный IV для этого процесса
-    if (local_crypto_data->ivsize > 0) {
-        if (local_crypto_data->ivsize > MAX_IV_SIZE) {
-            pr_err(DRV_NAME ": IV size %zu exceeds MAX_IV_SIZE %d\n",
-                   local_crypto_data->ivsize, MAX_IV_SIZE);
-            kfree(local_crypto_data);
-            return NULL;
-        }
-        get_random_bytes(local_crypto_data->iv, local_crypto_data->ivsize);
-    }
-
-    local_crypto_data->tfm = crypto_alloc_skcipher(algo_names[local_crypto_data->crypto_alg], 0, 0);
-    if (IS_ERR(local_crypto_data->tfm)) {
-        pr_err(DRV_NAME ": Failed to alloc crypto %s\n", algo_names[local_crypto_data->crypto_alg]);
+    if (drv_crypto_reinit(local_crypto_data) != 0) {
         kfree(local_crypto_data);
         return NULL;
-    }
-
-    ret = crypto_skcipher_setkey(local_crypto_data->tfm, local_crypto_data->key_str, strlen(local_crypto_data->key_str));
-    if (ret) {
-        pr_err(DRV_NAME ": Invalid key length for %s\n", algo_names[local_crypto_data->crypto_alg]);
-        crypto_free_skcipher(local_crypto_data->tfm);
-        kfree(local_crypto_data);
-        return NULL;
-    }
-
-    pr_info(DRV_NAME ": Crypto initialized: algo=%s, blocksize=%u, ivsize=%u\n",
-        algo_names[local_crypto_data->crypto_alg],
-        crypto_skcipher_blocksize(local_crypto_data->tfm),
-        crypto_skcipher_ivsize(local_crypto_data->tfm));
+    };
 
     return local_crypto_data;
 }
@@ -72,6 +41,42 @@ void drv_crypto_exit(struct crypto_ctx* ptr_crypto_ctx)
 {
     if (ptr_crypto_ctx->tfm)
         crypto_free_skcipher(ptr_crypto_ctx->tfm);
+}
+
+int drv_crypto_reinit(struct crypto_ctx* ptr_crypto_ctx)
+{
+    drv_crypto_exit(ptr_crypto_ctx);
+
+    ptr_crypto_ctx->tfm = crypto_alloc_skcipher(algo_names[ptr_crypto_ctx->crypto_alg], 0, 0);
+    if (IS_ERR(ptr_crypto_ctx->tfm)) {
+        pr_err(DRV_NAME ": Failed to alloc crypto %s\n", algo_names[ptr_crypto_ctx->crypto_alg]);
+        return -ENOMEM;
+    }
+
+    ptr_crypto_ctx->ivsize = drv_crypto_ivsize(ptr_crypto_ctx);
+    
+    if (ptr_crypto_ctx->ivsize > 0) {
+        if (ptr_crypto_ctx->ivsize > MAX_IV_SIZE) {
+            pr_err(DRV_NAME ": IV size %zu exceeds MAX_IV_SIZE %d\n",
+                   ptr_crypto_ctx->ivsize, MAX_IV_SIZE);
+            crypto_free_skcipher(ptr_crypto_ctx->tfm);          
+            return -EINVAL;
+        }
+        get_random_bytes(ptr_crypto_ctx->iv, ptr_crypto_ctx->ivsize);
+    }
+    
+    if (crypto_skcipher_setkey(ptr_crypto_ctx->tfm, ptr_crypto_ctx->key_str, strlen(ptr_crypto_ctx->key_str))) {
+        pr_err(DRV_NAME ": Invalid key length for %s\n", algo_names[ptr_crypto_ctx->crypto_alg]);
+        crypto_free_skcipher(ptr_crypto_ctx->tfm);
+        return -EINVAL;
+    }
+
+    pr_info(DRV_NAME ": Crypto initialized: algo=%s, blocksize=%u, ivsize=%u\n",
+        algo_names[ptr_crypto_ctx->crypto_alg],
+        crypto_skcipher_blocksize(ptr_crypto_ctx->tfm),
+        crypto_skcipher_ivsize(ptr_crypto_ctx->tfm));
+
+    return 0;
 }
 
 size_t drv_crypto_blocksize(struct crypto_ctx* ptr_crypto_ctx)

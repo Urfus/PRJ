@@ -29,8 +29,8 @@ static const struct test_case tests[] = {
     {"Basic open/close",                                        test_1 },
     {"Write and read",                                          test_2 },
     {"Encryption mode (default algo and key string)",           test_3 },
-    {"Encryption mode (algo CHACHA)",                           test_4 },
-    {"Encryption mode (algo DES)",                              test_5 },
+    {"Encryption mode (algo CBC AES)",                          test_4 },
+    {"Encryption mode (algo ECB AES)",                          test_5 },
     {"Key string change",                                       test_6 },
     {"Multy threads mode with default value",                   test_7 },
     {"Multy threads mode with different value",                 test_8 },
@@ -210,22 +210,224 @@ static int test_3(void)
 
 static int test_4(void)
 {
-    printf("  [Test 4] Testing decryption mode...\n");
-    // Здесь будет код теста
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    char plain[] = "** test string **";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+
+    enum my_crypto_type algo = ALGO_CBC_AES;
+    if (ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo) < 0) {
+        perror("ioctl CRYPTO_ALG /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    enum my_crypto_mode mode = MODE_ENCRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_ENCRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("Записано байт: %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("Прочитано байт: %lu, строка (зашифрованая): %s\n", rl, buf_out_enc); 
+    if (rl < 0) {
+        perror("read (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    mode = MODE_DECRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_DECRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    wl = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("Записано байт: %lu, строка (зашифрованная): %s\n", wl, buf_out_enc); 
+    if (wl < 0) {
+        perror("write (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    rl = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("Прочитано байт: %lu, строка (расшифрованая): %s\n", rl, buf_out_dec);
+    if (rl < 0) {
+        perror("read (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    if (strcmp(buf_out_dec, plain) != 0) {
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s", plain, buf_out_dec); 
+        return EXIT_FAILURE;   
+    }
+
+
+    if (close(fd) != 0) {
+        perror("close /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
     return 0;
 }
 
 static int test_5(void)
 {
-    printf("  [Test 5] Changing key via ioctl...\n");
-    // Здесь будет код теста
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    char plain[] = "** test string **";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+
+    enum my_crypto_type algo = ALGO_ECB_AES;
+    if (ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo) < 0) {
+        perror("ioctl CRYPTO_ALG /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    enum my_crypto_mode mode = MODE_ENCRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_ENCRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("Записано байт: %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("Прочитано байт: %lu, строка (зашифрованая): %s\n", rl, buf_out_enc); 
+    if (rl < 0) {
+        perror("read (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    mode = MODE_DECRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_DECRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    wl = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("Записано байт: %lu, строка (зашифрованная): %s\n", wl, buf_out_enc); 
+    if (wl < 0) {
+        perror("write (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    rl = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("Прочитано байт: %lu, строка (расшифрованая): %s\n", rl, buf_out_dec);
+    if (rl < 0) {
+        perror("read (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    if (strcmp(buf_out_dec, plain) != 0) {
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s", plain, buf_out_dec); 
+        return EXIT_FAILURE;   
+    }
+
+
+    if (close(fd) != 0) {
+        perror("close /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
     return 0;
 }
 
 static int test_6(void)
 {
-    printf("  [Test 5] Changing key via ioctl...\n");
-    // Здесь будет код теста
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    char plain[] = "** test string **";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+
+    // enum my_crypto_type algo = ALGO_ECB_AES;
+    // if (ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo) < 0) {
+    //     perror("ioctl CRYPTO_ALG /dev/crypt_drv"); 
+    //     return EXIT_FAILURE; 
+    // };
+
+    struct drv_key_param new_key = {"abcdefghabcdefgh", sizeof("abcdefghabcdefgh")}; 
+ 
+    if (ioctl(fd, IOCTL_SET_KEY_STR, &new_key) < 0) {
+        perror("ioctl SET_KEY_STR /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    enum my_crypto_mode mode = MODE_ENCRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_ENCRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("Записано байт: %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("Прочитано байт: %lu, строка (зашифрованая): %s\n", rl, buf_out_enc); 
+    if (rl < 0) {
+        perror("read (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    mode = MODE_DECRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_DECRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    wl = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("Записано байт: %lu, строка (зашифрованная): %s\n", wl, buf_out_enc); 
+    if (wl < 0) {
+        perror("write (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    rl = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("Прочитано байт: %lu, строка (расшифрованая): %s\n", rl, buf_out_dec);
+    if (rl < 0) {
+        perror("read (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    if (strcmp(buf_out_dec, plain) != 0) {
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s", plain, buf_out_dec); 
+        return EXIT_FAILURE;   
+    }
+
+
+    if (close(fd) != 0) {
+        perror("close /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
     return 0;
 }
 void* test_7_thread(void* arg) {
@@ -330,8 +532,67 @@ static int test_7(void)
 
 static int test_8(void)
 {
-    printf("  [Test 7] ...\n");
-    // Здесь будет код теста
+    pthread_t pth_second;
+
+    if (pthread_barrier_init(&sync_barrier, NULL, 2) != 0) {
+        perror("error init barrier");
+        return EXIT_FAILURE;
+    }
+
+    if (pthread_create(&pth_second, NULL, test_7_thread, NULL) != 0) {
+        perror("Error pthread_create");
+        return EXIT_FAILURE;
+    }
+
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) { perror("open"); return 1; }
+
+    char plain[] = "first test string";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+    int mode;
+
+    enum my_crypto_type algo = ALGO_CBC_AES;
+    ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo);
+        
+    mode = MODE_ENCRYPT;
+    ioctl(fd, IOCTL_SET_MODE, &mode);
+
+    struct drv_key_param new_key = {"abcdefghabcdefgh", sizeof("abcdefghabcdefgh")}; 
+    ioctl(fd, IOCTL_SET_KEY_STR, &new_key);
+
+
+    pthread_barrier_wait(&sync_barrier);
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("first: Записано байт: %lu, строка: %s\n", wl, plain); 
+
+    pthread_barrier_wait(&sync_barrier);
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("first: Прочитано байт (зашифровано): %lu, строка: %s\n", rl, buf_out_enc); 
+
+    mode = MODE_DECRYPT;
+    ioctl(fd, IOCTL_SET_MODE, &mode);
+
+    ssize_t w2 = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("first: Записано байт: %lu, строка: %s\n", w2, buf_out_enc); 
+
+    pthread_barrier_wait(&sync_barrier);
+
+    ssize_t r2 = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("first: Прочитано байт (расшифровано): %lu, строка: %s\n", r2, buf_out_dec); // Будет набор нечитаемых символов
+
+    close(fd);
+    printf("first: Stop thread\n");
+
+    if (pthread_join(pth_second, NULL) != 0) {
+        perror("Error pthread_join");
+        return EXIT_FAILURE;
+    }
+
+    pthread_barrier_destroy(&sync_barrier);
+
     return 0;
 }
 
@@ -378,29 +639,3 @@ int main(int argc, char *argv[])
         return run_test(test_num - 1);
     }
 }
-
-/*
-
-
-
-int main() {
-    printf("Start test modules\n");
-
-    pthread_barrier_wait(&sync_barrier); 
-
-    rl = read(fd, buf_out, sizeof(buf_out));
-    printf("FIRST: Прочитано байт: %lu, строка: %s\n", rl, buf_out); // Будет набор нечитаемых символов
-
-    if (pthread_join(pth_second, NULL) != 0) {
-        perror("Error pthread_join");
-        return EXIT_FAILURE;
-    }
-
-    pthread_barrier_destroy(&sync_barrier);
-
-    close(fd);
-    printf("Stop test modules\n");
-    return 0;
-}
-
-*/

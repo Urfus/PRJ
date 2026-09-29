@@ -13,9 +13,8 @@
 
 
 enum my_crypto_type {
-    ALGO_AES      = 0,
-    ALGO_CHACHA   = 1,
-    ALGO_DES      = 2,
+    ALGO_ECB_AES    = 0,
+    ALGO_CBC_AES    = 1,
 };
 
 enum my_crypto_mode {

@@ -36,7 +36,7 @@ static int drv_open(struct inode *inode, struct file *file)
 
     mutex_init(&ctx->lock);
 
-    ctx->crypto_data = drv_crypto_init();
+    ctx->crypto_data = drv_crypto_init(ALGO_ECB_AES);
     if (!ctx->crypto_data) {
         kfree(ctx);
         return -ENOMEM;
@@ -176,8 +176,13 @@ static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct proc_ctx *ctx = file->private_data;
     int mode;
+    int algo;
+    int ret;
 
-    if (cmd == IOCTL_SET_MODE) {
+    switch (cmd)
+    {
+    case IOCTL_SET_MODE:
+
         if (copy_from_user(&mode, (int __user *)arg, sizeof(int)))
             return -EFAULT;
         
@@ -191,6 +196,63 @@ static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         pr_info(DRV_NAME ": PID %d set mode to %s\n", 
                 current->pid, mode ? "DECRYPT" : "ENCRYPT");
         return 0;
+
+    case IOCTL_SET_CRYPTO_ALG:
+
+        if (copy_from_user(&algo, (int __user *)arg, sizeof(int)))
+            return -EFAULT;
+
+        if (algo != ALGO_ECB_AES && algo != ALGO_CBC_AES )
+            return -EINVAL;
+
+        ctx->crypto_data->crypto_alg = algo;
+
+        mutex_lock(&ctx->lock);
+
+        ret = drv_crypto_reinit(ctx->crypto_data);
+
+        mutex_unlock(&ctx->lock);
+
+        if (ret) {
+            pr_err(DRV_NAME ": Failed to reinit crypto with new key\n");
+            return ret;
+        }      
+
+        pr_info(DRV_NAME ": PID %d set mode to %s\n", 
+                current->pid, mode ? "DECRYPT" : "ENCRYPT");
+        return 0;
+
+    case IOCTL_SET_KEY_STR:
+        struct drv_key_param param;
+
+        if (copy_from_user(&param, (struct drv_key_param __user *)arg, sizeof(param)))
+            return -EFAULT;
+
+        if (param.key_len == 0 || param.key_len > DRV_MAX_KEY_LEN) {
+            pr_err(DRV_NAME ": Invalid key length: %zu\n", param.key_len);
+            return -EINVAL;
+        }
+
+        if (param.key_str[param.key_len - 1] != '\0') {
+            pr_err(DRV_NAME ": Key must be null-terminated\n");
+            return -EINVAL;
+        }
+
+        mutex_lock(&ctx->lock);
+
+        memcpy(ctx->crypto_data->key_str, param.key_str, param.key_len);
+        ret = drv_crypto_reinit(ctx->crypto_data);
+        mutex_unlock(&ctx->lock);
+
+        if (ret) {
+            pr_err(DRV_NAME ": Failed to reinit crypto with new key\n");
+            return ret;
+        }
+
+        return 0;
+
+    default:
+        break;
     }
 
     return -ENOTTY;
