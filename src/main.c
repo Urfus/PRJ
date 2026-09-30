@@ -67,54 +67,86 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
 {
     struct proc_ctx *ctx = file->private_data;
     char *kbuf;
+    size_t written;
 
-    u8 iv_local[MAX_IV_SIZE];  // Локальная копия IV
-    size_t written, crypto_len, final_len;
-    size_t block_size;
-    size_t alloc_size;
-
-    int ret;
-
-    if (!count)
-        return 0;
-
-    block_size = drv_crypto_blocksize(ctx->crypto_data);
-    alloc_size = count + block_size;
-    
-    kbuf = kmalloc(alloc_size, GFP_KERNEL);
+    kbuf = kmalloc(count, GFP_KERNEL);
     if (!kbuf) return -ENOMEM;
+
+    if (count == 0)
+        return 0;
 
     if (copy_from_user(kbuf, ubuf, count)) {
         kfree(kbuf);
         return -EFAULT;
     }
 
-    crypto_len = count;
+    mutex_lock(&ctx->lock);   
+    written = rb_put(ctx->rb, kbuf, count);
+    mutex_unlock(&ctx->lock);
+
+    kfree(kbuf);
+    return written ? (ssize_t)count : -ENOSPC;
+
+}
+    
+static ssize_t drv_read(struct file *file, char __user *ubuf,
+                        size_t count, loff_t *ppos)
+{
+    struct proc_ctx *ctx = file->private_data;
+    char *kbuf;
+    u8 iv_local[MAX_IV_SIZE];
+    size_t nread, crypto_len, final_len, to_copy;
+    size_t block_size, alloc_size;
+    int ret;
+
+    if (!count)
+        return 0;
+
+    block_size = drv_crypto_blocksize(ctx->crypto_data);
+    
+    alloc_size = count + block_size;
+    kbuf = kmalloc(alloc_size, GFP_KERNEL);
+    if (!kbuf)
+        return -ENOMEM;
+
+    mutex_lock(&ctx->lock);
+    nread = rb_get(ctx->rb, kbuf, count);
+    
+    if (nread == 0) {
+        mutex_unlock(&ctx->lock);
+        kfree(kbuf);
+        return 0;  
+    }
+
+    crypto_len = nread;
     
     if (ctx->mode == MODE_ENCRYPT) {
-        crypto_len = add_pkcs7_padding(kbuf, count, alloc_size, block_size);
+        crypto_len = add_pkcs7_padding(kbuf, nread, alloc_size, block_size);
         if (crypto_len == 0) {
+            pr_err(DRV_NAME ": Padding failed (buffer too small)\n");
+            mutex_unlock(&ctx->lock);
             kfree(kbuf);
             return -EINVAL;
         }
     } else {
-        if (block_size > 1 && (count % block_size) != 0) {
-            pr_err(DRV_NAME ": DECRYPT mode requires length multiple of %zu "
-                   "(got %zu)\n", block_size, count);
+        if (block_size > 1 && (nread % block_size) != 0) {
+            pr_err(DRV_NAME ": DECRYPT mode requires length multiple of %zu (got %zu)\n",
+                   block_size, nread);
+            mutex_unlock(&ctx->lock);
             kfree(kbuf);
             return -EINVAL;
         }
     }
 
-    mutex_lock(&ctx->lock);
     if (ctx->crypto_data->ivsize > 0)
         memcpy(iv_local, ctx->crypto_data->iv, ctx->crypto_data->ivsize);
 
-    ret = drv_do_crypto(ctx->crypto_data, kbuf, crypto_len, (ctx->mode == MODE_ENCRYPT), 
+    ret = drv_do_crypto(ctx->crypto_data, kbuf, crypto_len, 
+                        (ctx->mode == MODE_ENCRYPT), 
                         ctx->crypto_data->ivsize > 0 ? iv_local : NULL);
 
     if (ret < 0) {
-        pr_err(DRV_NAME ": error do_crypto  %d\n", ret);
+        pr_err(DRV_NAME ": error do_crypto %d\n", ret);
         mutex_unlock(&ctx->lock);
         kfree(kbuf);
         return ret;
@@ -123,45 +155,24 @@ static ssize_t drv_write(struct file *file, const char __user *ubuf,
     final_len = crypto_len;
     if (ctx->mode == MODE_DECRYPT) {
         final_len = remove_pkcs7_padding(kbuf, crypto_len);
+        if (final_len == 0) {
+            pr_err(DRV_NAME ": Invalid PKCS#7 padding after decryption\n");
+            mutex_unlock(&ctx->lock);
+            kfree(kbuf);
+            return -EINVAL;
+        }
     }
 
-    written = rb_put(ctx->rb, kbuf, final_len);
     mutex_unlock(&ctx->lock);
 
-    kfree(kbuf);
-    return written ? (ssize_t)count : -ENOSPC;
-}
-    
-static ssize_t drv_read(struct file *file, char __user *ubuf,
-                        size_t count, loff_t *ppos)
-{
-    struct proc_ctx *ctx = file->private_data;
-    char *kbuf;
-    size_t nread;
-
-    if (!count)
-        return 0;
-
-    kbuf = kmalloc(count, GFP_KERNEL);
-    if (!kbuf)
-        return -ENOMEM;
-
-    mutex_lock(&ctx->lock);
-    nread = rb_get(ctx->rb, kbuf, count);
-    mutex_unlock(&ctx->lock);
-
-    if (!nread) {
-        kfree(kbuf);
-        return 0;
-    }
-
-    if (copy_to_user(ubuf, kbuf, nread)) {
+    to_copy = min(final_len, count);
+    if (copy_to_user(ubuf, kbuf, to_copy)) {
         kfree(kbuf);
         return -EFAULT;
     }
 
     kfree(kbuf);
-    return (ssize_t)nread;
+    return (ssize_t)to_copy;
 }
 
 static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -192,7 +203,7 @@ static long drv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         if (copy_from_user(&algo, (int __user *)arg, sizeof(int)))
             return -EFAULT;
 
-        if (algo != ALGO_ECB_AES && algo != ALGO_CBC_AES )
+        if (algo != ALGO_ECB_AES && algo != ALGO_CBC_AES && algo != ALGO_CTR_AES)
             return -EINVAL;
 
         ctx->crypto_data->crypto_alg = algo;

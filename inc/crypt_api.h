@@ -15,6 +15,7 @@
 enum my_crypto_type {
     ALGO_ECB_AES    = 0,
     ALGO_CBC_AES    = 1,
+    ALGO_CTR_AES    = 2,
 };
 // режимы работы
 enum my_crypto_mode {

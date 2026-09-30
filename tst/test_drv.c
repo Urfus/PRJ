@@ -16,9 +16,11 @@ static int test_2(void);
 static int test_3(void);
 static int test_4(void);
 static int test_5(void);
+static int test_5_1(void);
 static int test_6(void);
 static int test_7(void);
 static int test_8(void);
+static int test_9(void);
 
 struct test_case {
     const char *name; 
@@ -31,9 +33,11 @@ static const struct test_case tests[] = {
     {"Encryption mode (default algo and key string)",           test_3 },
     {"Encryption mode (algo CBC AES)",                          test_4 },
     {"Encryption mode (algo ECB AES)",                          test_5 },
+    {"Encryption mode (algo CTR AES)",                          test_5_1 },
     {"Key string change",                                       test_6 },
     {"Multy threads mode with default value",                   test_7 },
     {"Multy threads mode with different value",                 test_8 },
+    {"sequential writing and a single reading",                 test_9 },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -195,7 +199,7 @@ static int test_3(void)
     }
 
     if (strcmp(buf_out_dec, plain) != 0) {
-        printf("Строки не совпадают, Исходная: %s, Полученная: %s", plain, buf_out_dec); 
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s\n", plain, buf_out_dec); 
         return EXIT_FAILURE;   
     }
 
@@ -221,6 +225,78 @@ static int test_4(void)
     char buf_out_dec[64] = {0};
 
     enum my_crypto_type algo = ALGO_CBC_AES;
+    if (ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo) < 0) {
+        perror("ioctl CRYPTO_ALG /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    enum my_crypto_mode mode = MODE_ENCRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_ENCRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("Записано байт: %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("Прочитано байт: %lu, строка (зашифрованая): %s\n", rl, buf_out_enc); 
+    if (rl < 0) {
+        perror("read (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    mode = MODE_DECRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_DECRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    wl = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("Записано байт: %lu, строка (зашифрованная): %s\n", wl, buf_out_enc); 
+    if (wl < 0) {
+        perror("write (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    rl = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("Прочитано байт: %lu, строка (расшифрованая): %s\n", rl, buf_out_dec);
+    if (rl < 0) {
+        perror("read (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    if (strcmp(buf_out_dec, plain) != 0) {
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s", plain, buf_out_dec); 
+        return EXIT_FAILURE;   
+    }
+
+
+    if (close(fd) != 0) {
+        perror("close /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    return 0;
+}
+
+static int test_5_1(void)
+{
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    char plain[] = "** test string **";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+
+    enum my_crypto_type algo = ALGO_CTR_AES;
     if (ioctl(fd, IOCTL_SET_CRYPTO_ALG, &algo) < 0) {
         perror("ioctl CRYPTO_ALG /dev/crypt_drv"); 
         return EXIT_FAILURE; 
@@ -592,6 +668,94 @@ static int test_8(void)
     }
 
     pthread_barrier_destroy(&sync_barrier);
+
+    return 0;
+}
+
+static int test_9(void)
+{
+    int fd = open("/dev/crypt_drv", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    char plain[] = "*str1*";
+    char buf_out_enc[64] = {0};
+    char buf_out_dec[64] = {0};
+
+    enum my_crypto_mode mode = MODE_ENCRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_ENCRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    ssize_t wl = write(fd, plain, strlen(plain));
+    printf("Записано байт (часть 1): %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    wl = write(fd, plain, strlen(plain));
+    printf("Записано байт (часть 2): %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    wl = write(fd, plain, strlen(plain));
+    printf("Записано байт (часть 3): %lu, строка (исходная): %s\n", wl, plain); 
+    if (wl < 0) {
+        perror("write (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    ssize_t rl = read(fd, buf_out_enc, sizeof(buf_out_enc));
+    printf("Прочитано байт: %lu, строка (зашифрованая): %s\n", rl, buf_out_enc); 
+    if (rl < 0) {
+        perror("read (step 1) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    mode = MODE_DECRYPT;
+    if (ioctl(fd, IOCTL_SET_MODE, &mode) < 0) {
+        perror("ioctl MODE_DECRYPT /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
+
+    wl = write(fd, buf_out_enc, strlen(buf_out_enc));
+    printf("Записано байт: %lu, строка (зашифрованная): %s\n", wl, buf_out_enc); 
+    if (wl < 0) {
+        perror("write (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    rl = read(fd, buf_out_dec, sizeof(buf_out_dec));
+    printf("Прочитано байт: %lu, строка (расшифрованая): %s\n", rl, buf_out_dec);
+    if (rl < 0) {
+        perror("read (step 2) /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    }
+
+    size_t len = strlen(plain);
+    char* cmp_buf = (char *)malloc(3*len+1);
+    strcpy(cmp_buf, plain);
+    strcpy(cmp_buf+len, plain);
+    strcpy(cmp_buf+len+len, plain);
+    cmp_buf[3*len+1] = 0;
+
+
+    if (strcmp(buf_out_dec, cmp_buf) != 0) {
+        printf("Строки не совпадают, Исходная: %s, Полученная: %s\n", cmp_buf, buf_out_dec); 
+        return EXIT_FAILURE;   
+    }
+
+
+    if (close(fd) != 0) {
+        perror("close /dev/crypt_drv"); 
+        return EXIT_FAILURE; 
+    };
 
     return 0;
 }

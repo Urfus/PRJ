@@ -8,8 +8,9 @@
 #include "../inc/crypt_drv.h"
 
 static const char *algo_names[] = {
-    "ecb(aes)",      // индекс 0
-    "cbc(aes)",      // индекс 1
+    "ecb(aes)",      
+    "cbc(aes)",      
+    "ctr(aes)",      
 };
 
 struct crypto_ctx* drv_crypto_init(enum my_crypto_type alg)
